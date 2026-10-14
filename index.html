@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LEITH AUDIO FX</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#101216;color:#eee;
+ font-family:Arial,sans-serif;padding:16px
+}
+.app{max-width:480px;margin:auto}
+header{
+ background:#20242c;padding:20px;border-radius:14px;
+ text-align:center;border:1px solid #454b56
+}
+h1{margin:0;color:#55d9ff;font-size:26px}
+p{color:#aeb6c4;font-size:13px}
+.panel{
+ background:#1b1f26;border:1px solid #363d49;
+ border-radius:12px;padding:16px;margin-top:14px
+}
+h3{margin-top:0;color:#55d9ff}
+label{display:block;margin:17px 0 8px}
+input[type=range]{width:100%;accent-color:#38d5ff}
+select,button{
+ width:100%;padding:13px;border-radius:9px;
+ background:#292f39;color:white;border:1px solid #505866;
+ margin-top:9px;font-size:15px
+}
+button{background:#087c9c;border:0;font-weight:bold}
+button:active{opacity:.7}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.value{float:left;color:#55d9ff}
+#status{color:#7df5a4;text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+<h1>LEITH AUDIO FX</h1>
+<p>تم التطوير بواسطة ليث</p>
+</header>
+
+<div class="panel">
+<h3>🎙️ المايك والمؤثرات</h3>
+<button id="start">تشغيل المايك</button>
+<button id="stop">إيقاف الصوت</button>
+<p id="status">الميكروفون متوقف</p>
+
+<label>قوة التأثير <span class="value" id="ev">65</span></label>
+<input id="effect" type="range" min="0" max="100" value="65">
+
+<label>نوع الصدى</label>
+<select id="preset">
+<option value="hall">قاعة كبيرة Hall</option>
+<option value="cathedral">كاتدرائية Cathedral</option>
+<option value="small">غرفة صغيرة</option>
+<option value="echo">صدى متكرر Echo</option>
+<option value="clean">صوت نظيف</option>
+</select>
+</div>
+
+<div class="panel">
+<h3>🎚️ التحكم بالصوت</h3>
+<label>مستوى الصوت <span class="value" id="vv">100</span></label>
+<input id="volume" type="range" min="0" max="150" value="100">
+
+<label>Bass <span class="value" id="bv">0</span></label>
+<input id="bass" type="range" min="-15" max="15" value="0">
+
+<label>Treble <span class="value" id="tv">0</span></label>
+<input id="treble" type="range" min="-15" max="15" value="0">
+
+<label>تأخير الصدى <span class="value" id="dv">250</span></label>
+<input id="delay" type="range" min="50" max="700" value="250">
+</div>
+
+<div class="panel">
+<h3>⚙️ خيارات الصوت</h3>
+<div class="grid">
+<button id="mute">كتم الصوت</button>
+<button id="reset">إعادة الضبط</button>
+</div>
+<p>الصوت تتم معالجته داخل الموقع. استخدم سماعة لتقليل الصفير.</p>
+</div>
+</div>
+
+<script>
+let ctx,stream,source,gain,bass,treble,
+ delayNode,feedback,dry,wet,mute=false;
+
+const $=id=>document.getElementById(id);
+function value(id,out,suffix=""){
+ $(out).textContent=$(id).value+suffix;
+}
+function makeReverb(seconds){
+ const length=Math.floor(ctx.sampleRate*seconds);
+ const buffer=ctx.createBuffer(2,length,ctx.sampleRate);
+ for(let c=0;c<2;c++){
+  let data=buffer.getChannelData(c);
+  for(let i=0;i<length;i++){
+   data[i]=(Math.random()*2-1)*
+    Math.pow(1-i/length,2.5);
+  }
+ }
+ return buffer;
+}
+function update(){
+ if(!ctx)return;
+ const amount=+$("effect").value/100;
+ const type=$("preset").value;
+ const room=type==="cathedral"?5:
+ type==="hall"?3.2:type==="small"?.8:2;
+
+ wet.gain.value=type==="clean"?0:amount*.8;
+ dry.gain.value=1-amount*.35;
+ delayNode.delayTime.value=+$("delay").value/1000;
+ feedback.gain.value=type==="echo"?.55:.18;
+ gain.gain.value=+$("volume").value/100;
+ bass.gain.value=+$("bass").value;
+ treble.gain.value=+$("treble").value;
+ $("ev").textContent=$("effect").value;
+ $("vv").textContent=$("volume").value;
+ $("bv").textContent=$("bass").value;
+ $("tv").textContent=$("treble").value;
+ $("dv").textContent=$("delay").value;
+ if(type!=="clean"){
+  wet.buffer=makeReverb(room);
+ }else{
+  wet.buffer=makeReverb(1);
+ }
+}
+async function start(){
+ try{
+  if(ctx)await stopAudio();
+  stream=await navigator.mediaDevices.getUserMedia({
+   audio:{echoCancellation:false,noiseSuppression:false,
+   autoGainControl:false}
+  });
+  ctx=new AudioContext();
+  await ctx.resume();
+  source=ctx.createMediaStreamSource(stream);
+  bass=ctx.createBiquadFilter();
+  bass.type="lowshelf";bass.frequency.value=180;
+  treble=ctx.createBiquadFilter();
+  treble.type="highshelf";treble.frequency.value=3500;
+  gain=ctx.createGain();
+  delayNode=ctx.createDelay(1);
+  feedback=ctx.createGain();
+  dry=ctx.createGain();
+  wet=ctx.createConvolver();
+  const echoReturn=ctx.createGain();
+  feedback.connect(delayNode);
+  delayNode.connect(echoReturn);
+  echoReturn.connect(feedback);
+  echoReturn.connect(gain);
+  source.connect(bass);
+  bass.connect(treble);
+  treble.connect(gain);
+  gain.connect(dry);
+  dry.connect(ctx.destination);
+  gain.connect(wet);
+  wet.connect(ctx.destination);
+  gain.connect(delayNode);
+  update();
+  $("status").textContent="الميكروفون يعمل";
+ }catch(e){
+  $("status").textContent="تعذر تشغيل المايك: "+e.message;
+ }
+}
+async function stopAudio(){
+ if(stream)stream.getTracks().forEach(t=>t.stop());
+ if(ctx)await ctx.close();
+ ctx=stream=null;
+ $("status").textContent="الميكروفون متوقف";
+}
+$("start").onclick=start;
+$("stop").onclick=stopAudio;
+["effect","volume","bass","treble","delay","preset"]
+.forEach(id=>$(id).addEventListener("input",update));
+$("mute").onclick=()=>{
+ mute=!mute;
+ if(ctx)ctx.destination.muted=mute;
+ $("mute").textContent=mute?"إلغاء الكتم":"كتم الصوت";
+};
+$("reset").onclick=()=>{
+ $("effect").value=65;$("volume").value=100;
+ $("bass").value=0;$("treble").value=0;
+ $("delay").value=250;$("preset").value="hall";
+ update();
+};
+</script>
+</body>
+</html>
